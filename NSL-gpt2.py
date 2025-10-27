@@ -26,8 +26,8 @@ def softmax(x):
     """
     x = x - torch.max(x, dim=-1, keepdim=True).values
     exp_x = torch.exp(x)
-    sum_exp_x = torch.sum(exp_x, dim=-1, keepdim=True)
-    return exp_x / sum_exp_x
+    sum = torch.sum(exp_x, dim=-1, keepdim=True)
+    return exp_x / sum
 
 def layer_norm(x, g_b, eps:float = 1e-5):
     """
@@ -89,7 +89,7 @@ def attention(q, k, v, mask):  # [n_q, d_k], [n_k, d_k], [n_k, d_v], [n_q, n_k] 
     """
     d_k = k.size(-1)
     attn_scores = (q @ k.transpose(-2, -1)) / math.sqrt(d_k)  # [n_q, d_k] @ [d_k, n_k] -> [n_q, n_k]
-    attn_scores = attn_scores.masked_fill(mask, float('-inf'))
+    attn_scores = attn_scores.masked_fill(~(mask == 0), float('-inf'))
     attn_weights = softmax(attn_scores)  # [n_q, n_k]
     return attn_weights @ v  # [n_q, n_k] @ [n_k, d_v] -> [n_q, d_v]
 
@@ -130,7 +130,8 @@ def mha(x, attn, n_head):  # [n_seq, n_embd] -> [n_seq, n_embd]
             | 0    0    0  ...   0  |
         Mask is a tensor whose dimension is [n_seq, n_seq]
     """
-    causal_mask = torch.triu(torch.ones(x.size(0), x.size(0)), diagonal=1).bool()  # [n_seq, n_seq]
+    causal_mask = torch.tril(torch.ones(x.size(0), x.size(0)))  # [n_seq, n_seq]
+    causal_mask = causal_mask.masked_fill(causal_mask == 0, float('-inf')).masked_fill(causal_mask == 1, float(0.0))
 
     # Perform attention over each head
     out_heads = [attention(q, k, v, causal_mask) for q, k, v in qkv_heads]  # n_head * [n_seq, n_embd/n_head]
