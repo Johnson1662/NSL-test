@@ -181,7 +181,7 @@ def generate(inputs, params, n_head, n_tokens_to_generate):
 
     for _ in tqdm(range(n_tokens_to_generate), "generating"):  # auto-regressive decode loop
         logits = gpt2(inputs, params, n_head=n_head)  # model forward pass
-        next_id = np.argmax(logits[-1])  # greedy sampling
+        next_id = np.argmax(logits[-1])  # greedy sampling (next_id is the most probable token)
         inputs.append(int(next_id))  # append prediction to input
 
     return inputs[len(inputs) - n_tokens_to_generate :]  # only return generated ids
@@ -221,12 +221,12 @@ def greedy_speculative_generate(inputs, draft_params, target_params, hparams_dra
 
             # Target model verifies all K tokens in a single forward pass
             target_logits = gpt2(draft_inputs, target_params, n_head=hparams_target["n_head"])
-            verification_logits = target_logits[len(current_inputs)-1:-1]
+            K_tokens_logits = target_logits[len(current_inputs)-1:-1]
 
             # Greedy Sampling by target model
             accepted_counts = 0
             for i in range(K):
-                target_next_id = int(np.argmax(verification_logits[i]))
+                target_next_id = int(np.argmax(K_tokens_logits[i]))
                 if target_next_id == draft_ids[i]:
                     accepted_counts += 1
                 else:
@@ -262,17 +262,15 @@ def main(prompt: str, n_tokens_to_generate: int = 5, draft_model_size: str = "12
     target_encoder, target_hparams, target_params = load_encoder_hparams_and_params(target_model_size, models_dir)
 
     # encode the input string using the BPE tokenizer
-    draft_input_ids = draft_encoder.encode(prompt)
-    target_input_ids = target_encoder.encode(prompt)
+    input_ids = target_encoder.encode(prompt)
 
     # make sure we are not surpassing the max sequence length of our model
-    assert len(draft_input_ids) + n_tokens_to_generate < draft_hparams["n_ctx"]
-    assert len(target_input_ids) + n_tokens_to_generate < target_hparams["n_ctx"]
+    assert len(input_ids) + n_tokens_to_generate < target_hparams["n_ctx"]
 
     # generate output ids
     start = time.time()
     # output_ids = generate(input_ids, params, hparams["n_head"], n_tokens_to_generate)
-    output_ids = greedy_speculative_generate(draft_input_ids, draft_params, target_params, draft_hparams, target_hparams, n_tokens_to_generate, K=4)
+    output_ids = greedy_speculative_generate(input_ids, draft_params, target_params, draft_hparams, target_hparams, n_tokens_to_generate, K=3)
     end = time.time()
     print(f"Time taken to generate {n_tokens_to_generate} tokens: {end - start:.2f}s")
 
