@@ -200,37 +200,84 @@ def greedy_speculative_generate(inputs, draft_params, target_params, hparams_dra
 
         Returns:
             list: A list of newly generated token IDs.
-            
+
     """
+
+    from tqdm import tqdm
+
     generated_ids = []
     current_inputs = list(inputs)
 
-    while len(generated_ids) < n_tokens_to_generate:
-        pass
+    with tqdm(total=n_tokens_to_generate, desc="Speculative Generating") as progress_bar:
+        while len(generated_ids) < n_tokens_to_generate:
+            # Draft model generates K tokens
+            draft_ids = []
+            draft_inputs = list(current_inputs)
+            for _ in range(K):
+                draft_logits = gpt2(draft_inputs, draft_params, n_head=hparams_draft["n_head"])
+                next_id = int(np.argmax(draft_logits[-1]))
+                draft_ids.append(next_id)
+                draft_inputs.append(next_id)
+
+            # Target model verifies all K tokens in a single forward pass
+            target_logits = gpt2(draft_inputs, target_params, n_head=hparams_target["n_head"])
+            verification_logits = target_logits[len(current_inputs)-1:-1]
+
+            # Greedy Sampling by target model
+            accepted_counts = 0
+            for i in range(K):
+                target_next_id = int(np.argmax(verification_logits[i]))
+                if target_next_id == draft_ids[i]:
+                    accepted_counts += 1
+                else:
+                    # correct the first wrong token
+                    extra_token = target_next_id 
+                    break
+            
+            if accepted_counts == K:
+                extra_token = int(np.argmax(target_logits[-1]))
+
+            # Add accepted tokens to the final output
+            accepted_ids = draft_ids[:accepted_counts] + [extra_token]
+            
+            for token_id in accepted_ids:
+                if len(generated_ids) < n_tokens_to_generate:
+                    generated_ids.append(token_id)
+                    current_inputs.append(token_id)
+                    progress_bar.update(1)
+                else:
+                    break
+            
+            if len(generated_ids) >= n_tokens_to_generate:
+                break
 
     return generated_ids
 
 
-def main(prompt: str, n_tokens_to_generate: int = 5, model_size: str = "124M", models_dir: str = "models"):
+def main(prompt: str, n_tokens_to_generate: int = 5, draft_model_size: str = "124M", target_model_size: str = "1558M", models_dir: str = "models"):
     from utils import load_encoder_hparams_and_params
 
     # load encoder, hparams, and params from the released open-ai gpt-2 files
-    encoder, hparams, params = load_encoder_hparams_and_params(model_size, models_dir)
+    draft_encoder, draft_hparams, draft_params = load_encoder_hparams_and_params(draft_model_size, models_dir)
+    target_encoder, target_hparams, target_params = load_encoder_hparams_and_params(target_model_size, models_dir)
 
     # encode the input string using the BPE tokenizer
-    input_ids = encoder.encode(prompt)
+    draft_input_ids = draft_encoder.encode(prompt)
+    target_input_ids = target_encoder.encode(prompt)
 
     # make sure we are not surpassing the max sequence length of our model
-    assert len(input_ids) + n_tokens_to_generate < hparams["n_ctx"]
+    assert len(draft_input_ids) + n_tokens_to_generate < draft_hparams["n_ctx"]
+    assert len(target_input_ids) + n_tokens_to_generate < target_hparams["n_ctx"]
 
     # generate output ids
     start = time.time()
-    output_ids = generate(input_ids, params, hparams["n_head"], n_tokens_to_generate)
+    # output_ids = generate(input_ids, params, hparams["n_head"], n_tokens_to_generate)
+    output_ids = greedy_speculative_generate(draft_input_ids, draft_params, target_params, draft_hparams, target_hparams, n_tokens_to_generate, K=4)
     end = time.time()
     print(f"Time taken to generate {n_tokens_to_generate} tokens: {end - start:.2f}s")
 
     # decode the ids back into a string
-    output_text = encoder.decode(output_ids)
+    output_text = draft_encoder.decode(output_ids)
     return output_text
 
 
