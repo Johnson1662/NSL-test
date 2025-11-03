@@ -7,7 +7,6 @@ torch.set_printoptions(8)
 def gelu(x):
     return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * x ** 3)))
 
-
 def softmax(x):
     x = x - torch.max(x, dim=-1, keepdim=True).values
     exp_x = torch.exp(x)
@@ -142,8 +141,8 @@ def generate(inputs, params, n_head, n_tokens_to_generate):
     logits = gpt2(inputs, params, n_head=n_head, layer_cache=layer_cache)  
     next_id = np.argmax(logits[-1]) 
     inputs.append(int(next_id))  
-    
-    for i in tqdm(range(n_tokens_to_generate - 1), "generating"):  # auto-regressive decode loop
+
+    for _ in tqdm(range(n_tokens_to_generate - 1), "generating"):  # auto-regressive decode loop
         # -1 to only pass in the last token for efficiency
         logits = gpt2([inputs[-1]], params, n_head=n_head, layer_cache=layer_cache)  # model forward pass
         next_id = np.argmax(logits[-1])  # greedy sampling
